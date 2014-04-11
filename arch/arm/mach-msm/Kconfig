@@ -1461,4 +1461,10 @@ config HAS_MACH_MEMUTILS
 	bool "Motorola MSM memcpy enhancements"
 	help
 	Faster memcpy performance for Krait
+
+config MSM_SLEEPER
+	bool "Limit max frequency while screen is off"
+	default y
+	help
+	  Limit max frequency while screen is off
 endif
