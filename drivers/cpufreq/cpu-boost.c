@@ -156,7 +156,8 @@ static int boost_mig_sync_thread(void *data)
 	if (!cpuboost_enable) return 0;
 
 	while (1) {
-		wait_event(s->sync_wq, s->pending || kthread_should_stop());
+		wait_event_interruptible(s->sync_wq,
+					s->pending || kthread_should_stop());
 
 		if (kthread_should_stop())
 			break;
