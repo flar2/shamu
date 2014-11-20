@@ -459,6 +459,7 @@ struct rq {
 	struct sched_domain *sd;
 
 	unsigned long cpu_power;
+	unsigned long cpu_available;
 
 	unsigned char idle_balance;
 	/* For active balancing */
@@ -596,7 +597,7 @@ struct sched_group_power {
 	 * CPU power of this group, SCHED_LOAD_SCALE being max power for a
 	 * single CPU.
 	 */
-	unsigned int power, power_orig;
+	unsigned int power, power_orig, power_available;
 	unsigned long next_update;
 	/*
 	 * Number of busy cpus in this group.
