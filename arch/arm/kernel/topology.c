@@ -24,6 +24,7 @@
 
 #include <asm/cputype.h>
 #include <asm/topology.h>
+#include <asm/smp_plat.h>
 
 /*
  * cpu power scale management
@@ -82,6 +83,51 @@ struct cpu_capacity {
 struct cpu_capacity *cpu_capacity;
 
 unsigned long middle_capacity = 1;
+
+static int __init get_dt_power_topology(struct device_node *topo)
+{
+	const u32 *reg;
+	int len, power = 0;
+	int flag = CPU_CORE_GATE;
+
+	for (; topo; topo = of_get_next_parent(topo)) {
+		reg = of_get_property(topo, "power-gate", &len);
+		if (reg && len == 4 && be32_to_cpup(reg))
+			power |= flag;
+		flag <<= 1;
+	}
+
+	return power;
+}
+
+#define for_each_subnode_with_property(dn, pn, prop_name) \
+	for (dn = of_find_node_with_property(pn, prop_name); dn; \
+	     dn = of_find_node_with_property(dn, prop_name))
+
+static void __init init_dt_power_topology(void)
+{
+	struct device_node *cn, *topo;
+
+	/* Get power domain topology information */
+	cn = of_find_node_by_path("/cpus/cpu-map");
+	if (!cn) {
+		pr_warn("Missing cpu-map node, bailing out\n");
+		return;
+	}
+
+	for_each_subnode_with_property(topo, cn, "cpu") {
+		struct device_node *cpu;
+
+		cpu = of_parse_phandle(topo, "cpu", 0);
+		if (cpu) {
+			u32 hwid;
+
+			of_property_read_u32(cpu, "reg", &hwid);
+			cpu_topology[get_logical_index(hwid)].flags = get_dt_power_topology(topo);
+
+		}
+	}
+}
 
 /*
  * Iterate all CPUs' descriptor in DT and compute the efficiency
@@ -163,6 +209,8 @@ static void __init parse_dt_topology(void)
 		middle_capacity = ((max_capacity / 3)
 				>> (SCHED_POWER_SHIFT-1)) + 1;
 
+	/* Retrieve power topology information from DT */
+	init_dt_power_topology();
 }
 
 /*
@@ -306,7 +354,7 @@ void __init init_cpu_topology(void)
 		cpu_topo->socket_id = -1;
 		cpumask_clear(&cpu_topo->core_sibling);
 		cpumask_clear(&cpu_topo->thread_sibling);
-
+		cpu_topo->flags = 0;
 		set_power_scale(cpu, SCHED_POWER_SCALE);
 	}
 	smp_wmb();
