@@ -49,7 +49,7 @@ static int hfpll_uv[] = {
 static DEFINE_VDD_REGULATORS(vdd_hfpll, ARRAY_SIZE(hfpll_uv)/2, 2,
 				hfpll_uv, NULL);
 
-static unsigned long hfpll_fmax[] = { 0, 998400000, 1996800000, 2900000000UL };
+static unsigned long hfpll_fmax[] = { 0, 998400000, 1996800000, 3100000000UL };
 
 static struct hfpll_data hdata = {
 	.mode_offset = 0x0,
@@ -63,7 +63,7 @@ static struct hfpll_data hdata = {
 	.user_val = 0x8,
 	.low_vco_max_rate = 1248000000,
 	.min_rate = 537600000UL,
-	.max_rate = 2900000000UL,
+	.max_rate = 3100000000UL,
 };
 
 static struct hfpll_clk hfpll0_clk = {
