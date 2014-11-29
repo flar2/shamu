@@ -72,6 +72,24 @@ struct cpufreq_suspend_t {
 	int device_suspended;
 };
 
+//elementalx
+static unsigned long arg_cpu_oc = 2649600;
+
+static int __init cpufreq_read_cpu_oc(char *cpu_oc)
+{
+	unsigned long ui_khz;
+	int err;
+
+	err =  strict_strtoul(cpu_oc, 0, &ui_khz);
+	if (err)
+		arg_cpu_oc = 0;
+
+	arg_cpu_oc = ui_khz;
+	printk("elementalx: cpu_oc=%lu\n", arg_cpu_oc);
+	return 0;
+}
+__setup("cpu_oc=", cpufreq_read_cpu_oc);
+
 static DEFINE_PER_CPU(struct cpufreq_suspend_t, cpufreq_suspend);
 
 unsigned long msm_cpufreq_get_bw(void)
@@ -476,6 +494,12 @@ static int cpufreq_parse_dt(struct device *dev)
 		 */
 		if (i > 0 && f <= freq_table[i-1].frequency)
 			break;
+
+		//elementalx
+		if (f > arg_cpu_oc) {
+			nf = i;
+			break;
+		}
 
 		freq_table[i].driver_data = i;
 		freq_table[i].frequency = f;
