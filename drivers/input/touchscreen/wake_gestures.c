@@ -329,6 +329,11 @@ static void detect_sweep2wake_h(int x, int y, bool st, bool scr_suspended)
         int prevx = 0, nextx = 0;
         bool single_touch = st;
 
+	if (!scr_suspended && y < SWEEP_Y_LIMIT) {
+		sweep2wake_reset();
+		return;
+	}
+
 	if (firstx == 0) {
 		firstx = x;
 		firstx_time = jiffies;
