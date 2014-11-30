@@ -45,6 +45,9 @@ static struct workqueue_struct *cpu_boost_wq;
 
 static struct work_struct input_boost_work;
 
+bool cpuboost_enable = true;
+module_param(cpuboost_enable, bool, 0644);
+
 static unsigned int boost_ms;
 module_param(boost_ms, uint, 0644);
 
@@ -86,6 +89,8 @@ static int boost_adjust_notify(struct notifier_block *nb, unsigned long val,
 	unsigned int b_min = s->boost_min;
 	unsigned int ib_min = s->input_boost_min;
 	unsigned int min;
+
+	if (!cpuboost_enable) return NOTIFY_OK;
 
 	switch (val) {
 	case CPUFREQ_ADJUST:
@@ -147,6 +152,8 @@ static int boost_mig_sync_thread(void *data)
 	struct cpufreq_policy src_policy;
 	unsigned long flags;
 	unsigned int req_freq;
+
+	if (!cpuboost_enable) return 0;
 
 	while (1) {
 		wait_event(s->sync_wq, s->pending || kthread_should_stop());
@@ -216,6 +223,8 @@ static int boost_migration_notify(struct notifier_block *nb,
 	unsigned long flags;
 	struct cpu_sync *s = &per_cpu(sync_info, mnd->dest_cpu);
 
+	if (!cpuboost_enable) return NOTIFY_OK;
+
 	if (load_based_syncs && (mnd->load <= migration_load_threshold))
 		return NOTIFY_OK;
 
@@ -255,6 +264,8 @@ static void do_input_boost(struct work_struct *work)
 	struct cpu_sync *i_sync_info;
 	struct cpufreq_policy policy;
 
+	if (!cpuboost_enable) return;
+
 	get_online_cpus();
 	for_each_online_cpu(i) {
 
@@ -279,6 +290,8 @@ static void cpuboost_input_event(struct input_handle *handle,
 		unsigned int type, unsigned int code, int value)
 {
 	u64 now;
+
+	if (!cpuboost_enable) return;
 
 	if (!input_boost_freq)
 		return;
