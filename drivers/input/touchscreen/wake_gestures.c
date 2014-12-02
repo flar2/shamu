@@ -64,6 +64,7 @@
 #define SWEEP_LEFT		0x02
 #define SWEEP_UP		0x04
 #define SWEEP_DOWN		0x08
+#define VIB_STRENGTH 		20
 
 
 #define WAKE_GESTURES_ENABLED	0
@@ -89,6 +90,7 @@ static unsigned long pwrtrigger_time[2] = {0, 0};
 static unsigned long long tap_time_pre = 0;
 static int touch_nr = 0, x_pre = 0, y_pre = 0;
 static bool touch_cnt = true;
+static int vib_strength = VIB_STRENGTH;
 
 static struct input_dev * wake_dev;
 static DEFINE_MUTEX(pwrkeyworklock);
@@ -144,6 +146,7 @@ static void wake_pwrtrigger(void) {
 	if (pwrtrigger_time[0] - pwrtrigger_time[1] < TRIGGER_TIMEOUT)
 		return;
 
+	set_vibrate(vib_strength);
 	schedule_work(&wake_presspwr_work);
         return;
 }
@@ -280,6 +283,7 @@ static void detect_sweep2wake_v(int x, int y, bool st)
 								report_gesture(3);
 							} else {
 #endif
+								set_vibrate(100);
 								wake_pwrtrigger();
 #if (WAKE_GESTURES_ENABLED)
 							}		
@@ -641,6 +645,27 @@ static DEVICE_ATTR(wake_gestures, (S_IWUSR|S_IRUGO),
 	wake_gestures_show, wake_gestures_dump);
 #endif	
 
+static ssize_t vib_strength_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	size_t count = 0;
+	count += sprintf(buf, "%d\n", vib_strength);
+	return count;
+}
+
+static ssize_t vib_strength_dump(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	sscanf(buf, "%d ",&vib_strength);
+	if (vib_strength < 0 || vib_strength > 90)
+		vib_strength = 20;
+
+	return count;
+}
+
+static DEVICE_ATTR(vib_strength, (S_IWUSR|S_IRUGO),
+	vib_strength_show, vib_strength_dump);
+
 
 /*
  * INIT / EXIT stuff below here
@@ -709,6 +734,10 @@ static int __init wake_gestures_init(void)
 		rc = sysfs_create_file(android_touch_kobj, &dev_attr_doubletap2wake.attr);
 	if (rc) {
 		pr_warn("%s: sysfs_create_file failed for doubletap2wake\n", __func__);
+	}
+	rc = sysfs_create_file(android_touch_kobj, &dev_attr_vib_strength.attr);
+	if (rc) {
+		pr_warn("%s: sysfs_create_file failed for vib_strength\n", __func__);
 	}
 #if (WAKE_GESTURES_ENABLED)
 	rc = sysfs_create_file(android_touch_kobj, &dev_attr_wake_gestures.attr);
