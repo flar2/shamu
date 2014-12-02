@@ -668,7 +668,7 @@ error:
 static int msm_ipc_router_hsic_xprt_probe(
 				struct platform_device *pdev)
 {
-	int ret;
+	int ret = 0;
 	struct msm_ipc_router_hsic_xprt_config hsic_xprt_config;
 
 	if (pdev && pdev->dev.of_node) {

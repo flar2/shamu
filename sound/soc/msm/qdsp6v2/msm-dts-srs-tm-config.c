@@ -120,9 +120,9 @@ static int msm_dts_srs_trumedia_control_set_(struct snd_kcontrol *kcontrol,
 					__func__, i, i>>1);
 				break;
 			}
-			pr_debug("SRS %s: param_index %d index %d val %d",
+			/*pr_debug("SRS %s: param_index %d index %d val %d",
 				__func__, index, i,
-				msm_srs_trumedia_params[index].raw_params[i]);
+				msm_srs_trumedia_params[index].raw_params[i]);*/
 		}
 	}
 	return 0;

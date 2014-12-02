@@ -1093,7 +1093,7 @@ int rmnet_usb_ctrl_init(int no_rmnet_devs, int no_rmnet_insts_per_dev,
 		unsigned long mux_info)
 {
 	struct rmnet_ctrl_dev	*dev;
-	struct rmnet_ctrl_udev	*cudev;
+	struct rmnet_ctrl_udev	*cudev = NULL;
 	int			i, n;
 	int			status;
 	int			cmux_enabled;

@@ -4024,7 +4024,7 @@ static int mxt_get_tdat_config_id(const unsigned char *data, size_t size,
 static int mxt_parse_tdat_image(struct mxt_data *data)
 {
 	struct device *dev = &data->client->dev;
-	u32 firmware_id;
+	u32 firmware_id = 0;
 	u8 *section, id;
 	size_t ii, length, offset, header_sz, raw_size = data->tdat->size;
 	const u8 *raw_image = data->tdat->data;
@@ -4474,7 +4474,7 @@ int mxt_dt_parse_mode(struct mxt_data *data, const char *mode_name,
 	struct device *dev = &data->client->dev;
 	struct device_node *np = dev->of_node;
 	struct device_node *np_modes;
-	int ret;
+	int ret = 0;
 	char *propname;
 	struct property *prop;
 	const __be32 *list;

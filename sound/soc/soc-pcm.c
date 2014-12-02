@@ -2097,7 +2097,7 @@ int soc_dpcm_runtime_update(struct snd_soc_dapm_widget *widget)
 
 	mutex_lock_nested(&card->mutex, SND_SOC_CARD_CLASS_RUNTIME);
 	for (i = 0; i < card->num_rtd; i++) {
-		struct snd_soc_dapm_widget_list *list;
+		struct snd_soc_dapm_widget_list *list = NULL;
 		struct snd_soc_pcm_runtime *fe = &card->rtd[i];
 
 		/* make sure link is FE */
@@ -2206,7 +2206,7 @@ static int dpcm_fe_dai_open(struct snd_pcm_substream *fe_substream)
 {
 	struct snd_soc_pcm_runtime *fe = fe_substream->private_data;
 	struct snd_soc_dpcm *dpcm;
-	struct snd_soc_dapm_widget_list *list;
+	struct snd_soc_dapm_widget_list *list = NULL;
 	int ret;
 	int stream = fe_substream->stream;
 

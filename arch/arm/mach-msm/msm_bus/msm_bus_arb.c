@@ -909,8 +909,8 @@ int msm_bus_scale_client_update_request(uint32_t cl, unsigned index)
 {
 	int i, ret = 0;
 	struct msm_bus_scale_pdata *pdata;
-	int pnode, src, curr, ctx;
-	uint64_t req_clk, req_bw, curr_clk, curr_bw;
+	int pnode, src = 0, curr, ctx;
+	uint64_t req_clk = 0, req_bw = 0, curr_clk = 0, curr_bw = 0;
 	struct msm_bus_client *client = (struct msm_bus_client *)cl;
 	if (IS_ERR_OR_NULL(client)) {
 		MSM_BUS_ERR("msm_bus_scale_client update req error %d\n",

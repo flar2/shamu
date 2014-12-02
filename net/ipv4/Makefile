@@ -1,7 +1,7 @@
 #
 # Makefile for the Linux TCP/IP (INET) layer.
 #
-
+ccflags-y := -Wno-maybe-uninitialized
 obj-y     := route.o inetpeer.o protocol.o \
 	     ip_input.o ip_fragment.o ip_forward.o ip_options.o \
 	     ip_output.o ip_sockglue.o inet_hashtables.o \
