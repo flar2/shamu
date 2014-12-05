@@ -225,8 +225,6 @@ static int msm_cpufreq_init(struct cpufreq_policy *policy)
 	policy->min = CONFIG_MSM_CPU_FREQ_MIN;
 	policy->max = CONFIG_MSM_CPU_FREQ_MAX;
 #endif
-	policy->max = 2649600;
-	policy->min = 300000;
 
 	cur_freq = clk_get_rate(cpu_clk[policy->cpu])/1000;
 
@@ -248,7 +246,7 @@ static int msm_cpufreq_init(struct cpufreq_policy *policy)
 		return ret;
 	pr_debug("cpufreq: cpu%d init at %d switching to %d\n",
 			policy->cpu, cur_freq, table[index].frequency);
-	policy->cur = policy->max;
+	policy->cur = table[index].frequency;
 
 	return 0;
 }
