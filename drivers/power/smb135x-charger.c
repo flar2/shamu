@@ -30,6 +30,10 @@
 #include <linux/reboot.h>
 #include <linux/qpnp/qpnp-adc.h>
 
+#ifdef CONFIG_FORCE_FAST_CHARGE
+#include <linux/fastcharge.h>
+#endif
+
 #define SMB135X_BITS_PER_REG	8
 
 /* Mask/Bit helpers */
@@ -1558,6 +1562,11 @@ static int smb135x_set_appropriate_current(struct smb135x_chg *chip,
 	}
 
 	if (path == USB) {
+#ifdef CONFIG_FORCE_FAST_CHARGE
+		if (force_fast_charge)
+			path_current = USB_FASTCHARGE_CURRENT_LIMIT;
+		else
+#endif
 		path_current = chip->usb_psy_ma;
 		func = smb135x_set_usb_chg_current;
 	} else {
