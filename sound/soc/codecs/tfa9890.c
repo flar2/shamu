@@ -40,6 +40,10 @@
 #include <sound/tlv.h>
 #include "tfa9890-core.h"
 
+#ifdef CONFIG_WAKE_GESTURES
+#include <linux/wake_gestures.h>
+bool in_phone_call = false;
+#endif
 
 #define I2C_RETRY_DELAY		5 /* ms */
 #define I2C_RETRIES		5
@@ -818,11 +822,17 @@ static int tfa9890_put_ch_sel(struct snd_kcontrol *kcontrol,
 	val = snd_soc_read(codec, TFA9890_I2S_CTL_REG);
 	ch_sel = (TFA9890_I2S_CHS12 & val) >> 3;
 
-	if (ucontrol->value.integer.value[0] != 0x3)
+	if (ucontrol->value.integer.value[0] != 0x3) {
 		tfa9890->cfg_mode = 0;
-	else
+#ifdef CONFIG_WAKE_GESTURES
+		in_phone_call = false;
+#endif
+	} else {
 		tfa9890->cfg_mode = 1;
-
+#ifdef CONFIG_WAKE_GESTURES
+		in_phone_call = true;
+#endif
+	}
 	/* check if config file need to switched */
 	if (ch_sel != ucontrol->value.integer.value[0]) {
 		val = snd_soc_read(codec, TFA9890_SYS_STATUS_REG);
