@@ -136,10 +136,17 @@ struct t7_config {
 	u8 idle;
 	u8 active;
 	u8 actv2idle;
+#ifdef CONFIG_WAKE_GESTURES
+	u8 cfg;
+	u8 cfg2;
+#endif
 } __packed;
 
 #define MXT_POWER_CFG_RUN		0
 #define MXT_POWER_CFG_DEEPSLEEP		1
+#ifdef CONFIG_WAKE_GESTURES
+#define MXT_POWER_CFG_WG		2
+#endif
 
 /* MXT_TOUCH_MULTI_T9 field */
 #define MXT_T9_ORIENT		9
@@ -2229,9 +2236,15 @@ static int mxt_set_t7_power_cfg(struct mxt_data *data, u8 sleep)
 	int error;
 	struct t7_config *new_config;
 	struct t7_config deepsleep = { .active = 0, .idle = 0 };
-
+#ifdef CONFIG_WAKE_GESTURES
+	struct t7_config wg_mode = { 100, 50, 10, 194, 1 };
+#endif
 	if (sleep == MXT_POWER_CFG_DEEPSLEEP)
 		new_config = &deepsleep;
+#ifdef CONFIG_WAKE_GESTURES
+	else if (sleep == MXT_POWER_CFG_WG)
+		new_config = &wg_mode;
+#endif
 	else
 		new_config = &data->t7_on_cfg;
 
@@ -2455,6 +2468,7 @@ static void mxt_set_sensor_state(struct mxt_data *data, int state)
 		data->mode_is_wakeable = true;
 		data->enable_reporting = true;
 		mxt_enable_wakeup_source(data, true);
+		mxt_set_t7_power_cfg(data, MXT_POWER_CFG_WG);
 		if (!data->in_bootloader)
 			mxt_sensor_state_config(data, ACTIVE_IDX);
 			break;
