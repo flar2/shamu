@@ -4980,7 +4980,7 @@ static int mxt_suspend(struct device *dev)
 		dev_dbg(&data->client->dev, "critical section LOCK\n");
 
 #ifdef CONFIG_WAKE_GESTURES
-		if (s2w_switch && !in_phone_call)
+		if (s2w_switch)
 			mxt_set_sensor_state(data, STATE_WG);
 		else
 #endif
