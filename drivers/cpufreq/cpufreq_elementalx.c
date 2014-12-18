@@ -50,6 +50,7 @@
 static unsigned int min_sampling_rate;
 static int orig_up_threshold = 90;
 static int g_count = 0;
+extern bool cpuboost_enable;
 
 #define LATENCY_MULTIPLIER			(1000)
 #define MIN_LATENCY_MULTIPLIER			(100)
@@ -1204,6 +1205,9 @@ static int __init cpufreq_gov_dbs_init(void)
 {
 	u64 idle_time;
 	int cpu = get_cpu();
+
+	if (cpuboost_enable)
+		cpuboost_enable = false;
 
 	idle_time = get_cpu_idle_time_us(cpu, NULL);
 	put_cpu();
