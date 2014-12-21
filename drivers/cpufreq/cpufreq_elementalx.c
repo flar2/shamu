@@ -949,7 +949,7 @@ static void do_dbs_timer(struct work_struct *work)
 	mutex_lock(&dbs_info->timer_mutex);
 
 	dbs_info->sample_type = DBS_NORMAL_SAMPLE;
-	if (true || sample_type == DBS_NORMAL_SAMPLE) {
+	if (sample_type == DBS_NORMAL_SAMPLE) {
 		dbs_check_cpu(dbs_info);
 		if (dbs_info->freq_lo) {
 			
