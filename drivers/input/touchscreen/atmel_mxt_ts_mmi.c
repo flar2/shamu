@@ -2237,7 +2237,7 @@ static int mxt_set_t7_power_cfg(struct mxt_data *data, u8 sleep)
 	struct t7_config *new_config;
 	struct t7_config deepsleep = { .active = 0, .idle = 0 };
 #ifdef CONFIG_WAKE_GESTURES
-	struct t7_config wg_mode = { 100, 50, 10, 194, 1 };
+	struct t7_config wg_mode = { 100, 255, 10, 194, 1 };
 #endif
 	if (sleep == MXT_POWER_CFG_DEEPSLEEP)
 		new_config = &deepsleep;
