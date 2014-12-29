@@ -1497,7 +1497,14 @@ static int smb135x_set_usb_chg_current(struct smb135x_chg *chip,
 		goto out;
 	}
 	if (current_ma == CURRENT_500_MA) {
-		rc = smb135x_masked_write(chip, CFG_5_REG, USB_2_3_BIT, 0);
+		
+#ifdef CONFIG_FORCE_FAST_CHARGE
+		if (force_fast_charge)
+			rc = smb135x_masked_write(chip, CFG_5_REG, USB_2_3_BIT, USB_2_3_BIT);
+		else
+#endif
+			rc = smb135x_masked_write(chip, CFG_5_REG, USB_2_3_BIT, 0);
+	
 		rc |= smb135x_masked_write(chip, CMD_INPUT_LIMIT,
 				USB_100_500_AC_MASK, USB_500_VAL);
 		rc |= smb135x_path_suspend(chip, USB, CURRENT, false);
@@ -1562,11 +1569,6 @@ static int smb135x_set_appropriate_current(struct smb135x_chg *chip,
 	}
 
 	if (path == USB) {
-#ifdef CONFIG_FORCE_FAST_CHARGE
-		if (force_fast_charge)
-			path_current = USB_FASTCHARGE_CURRENT_LIMIT;
-		else
-#endif
 		path_current = chip->usb_psy_ma;
 		func = smb135x_set_usb_chg_current;
 	} else {
