@@ -51,6 +51,7 @@ static unsigned int min_sampling_rate;
 static int orig_up_threshold = 90;
 static int g_count = 0;
 extern bool cpuboost_enable;
+static bool cpuboost_enable_flag = false;
 
 #define LATENCY_MULTIPLIER			(1000)
 #define MIN_LATENCY_MULTIPLIER			(100)
@@ -1130,6 +1131,12 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		if (dbs_enable == 1) {
 			unsigned int latency;
 
+		        if (cpuboost_enable)  {
+			       cpuboost_enable_flag = true;
+			       cpuboost_enable = false;
+
+		        }
+
 			rc = sysfs_create_group(cpufreq_global_kobject,
 						&dbs_attr_group);
 			if (rc) {
@@ -1179,6 +1186,10 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			input_unregister_handler(&dbs_input_handler);
 		mutex_unlock(&dbs_mutex);
 		if (!dbs_enable) {
+
+		        if (cpuboost_enable_flag)
+			       cpuboost_enable = true;
+
 			dbs_deinit_freq_map_table();
 			sysfs_remove_group(cpufreq_global_kobject,
 					   &dbs_attr_group);
@@ -1205,9 +1216,6 @@ static int __init cpufreq_gov_dbs_init(void)
 {
 	u64 idle_time;
 	int cpu = get_cpu();
-
-	if (cpuboost_enable)
-		cpuboost_enable = false;
 
 	idle_time = get_cpu_idle_time_us(cpu, NULL);
 	put_cpu();
