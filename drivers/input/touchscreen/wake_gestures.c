@@ -67,7 +67,7 @@
 #define VIB_STRENGTH 		20
 
 
-#define WAKE_GESTURES_ENABLED	0
+#define WAKE_GESTURES_ENABLED	1
 
 #define LOGTAG			"WG"
 
@@ -115,6 +115,7 @@ static void report_gesture(int gest)
 	if (pwrtrigger_time[0] - pwrtrigger_time[1] < TRIGGER_TIMEOUT)
 		return;
 
+	wake_lock_timeout(&dt2w_wakelock, HZ/2);
 	printk("WG: gesture = %d\n", gest);
 	input_report_rel(gesture_dev, WAKE_GESTURE, gest);
 	input_sync(gesture_dev);
@@ -716,7 +717,6 @@ static int __init wake_gestures_init(void)
 		pr_err("%s: input_register_device err=%d\n", __func__, rc);
 		goto err_gesture_dev;
 	}
-	gestures_setdev(gesture_dev);	
 #endif
 
 	android_touch_kobj = kobject_create_and_add("android_touch", NULL) ;
@@ -745,8 +745,11 @@ static int __init wake_gestures_init(void)
 		pr_warn("%s: sysfs_create_file failed for wake_gestures\n", __func__);
 	}
 
+	return 0;
+
 err_gesture_dev:
 	input_free_device(gesture_dev);
+err_alloc_dev:
 #endif
 
 	return 0;
