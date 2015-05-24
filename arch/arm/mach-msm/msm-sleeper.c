@@ -171,15 +171,18 @@ static void __ref msm_sleeper_resume(struct work_struct *work)
 
 	sleeper_data.suspended = false;
 	
-	if (sleeper_data.plug_all) {
+
+	if (sleeper_data.max_online == 2) {
+		if (cpu_is_offline(1)) {
+			cpu_up(1);
+		}
+	} else if (sleeper_data.plug_all) {
 		for_each_possible_cpu(cpu) {
 			if (cpu && cpu_is_offline(cpu)) {
 				cpu_up(cpu);
 			}
 		}
-	} else if (cpu_is_offline(1)) {
-		cpu_up(1);
-	}
+	} 
 }
 
 static int fb_notifier_callback(struct notifier_block *this,
