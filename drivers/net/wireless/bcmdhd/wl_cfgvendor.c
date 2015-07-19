@@ -565,7 +565,7 @@ static int wl_cfgvendor_set_scan_cfg(struct wiphy *wiphy,
 							break;
 						case GSCAN_ATTRIBUTE_BUCKET_CHANNELS:
 							nla_for_each_nested(iter2, iter1, tmp2) {
-								if (k >= PFN_SWC_RSSI_WINDOW_MAX)
+								if (k >= GSCAN_MAX_CHANNELS_IN_BUCKET)
 									break;
 								ch_bucket[j].chan_list[k] =
 								     nla_get_u32(iter2);
@@ -580,6 +580,14 @@ static int wl_cfgvendor_set_scan_cfg(struct wiphy *wiphy,
 						case GSCAN_ATTRIBUTE_REPORT_EVENTS:
 							ch_bucket[j].report_flag = (uint8)
 							     nla_get_u32(iter1);
+							break;
+						case GSCAN_ATTRIBUTE_BUCKET_STEP_COUNT:
+							ch_bucket[j].repeat = (uint16)
+							     nla_get_u32(iter1);
+							break;
+						case GSCAN_ATTRIBUTE_BUCKET_MAX_PERIOD:
+							ch_bucket[j].bucket_max_multiple =
+							     nla_get_u32(iter1)/1000;
 							break;
 					}
 				}
@@ -2395,10 +2403,12 @@ static const struct  nl80211_vendor_cmd_info wl_vendor_events [] = {
 		{ OUI_GOOGLE, GOOGLE_SCAN_COMPLETE_EVENT },
 		{ OUI_GOOGLE, GOOGLE_GSCAN_GEOFENCE_LOST_EVENT },
 		{ OUI_GOOGLE, GOOGLE_SCAN_EPNO_EVENT },
-		{ OUI_GOOGLE, GOOGLE_PNO_HOTSPOT_FOUND_EVENT },
 #endif /* GSCAN_SUPPORT */
 		{ OUI_GOOGLE, GOOGLE_DEBUG_RING_EVENT },
-		{ OUI_GOOGLE, GOOGLE_FW_DUMP_EVENT }
+		{ OUI_GOOGLE, GOOGLE_FW_DUMP_EVENT },
+#ifdef GSCAN_SUPPORT
+		{ OUI_GOOGLE, GOOGLE_PNO_HOTSPOT_FOUND_EVENT }
+#endif /* GSCAN_SUPPORT */
 };
 
 int wl_cfgvendor_attach(struct wiphy *wiphy, dhd_pub_t *dhd)

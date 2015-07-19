@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -17,6 +17,7 @@
 #include "mdss_fb.h"
 #include "mdss_mdp.h"
 #include "mdss_mdp_pp.h"
+#include "mdss_debug.h"
 #include <linux/uaccess.h>
 #include <linux/spinlock.h>
 #include <linux/delay.h>
@@ -1085,7 +1086,8 @@ static int mdss_mdp_scale_setup(struct mdss_mdp_pipe *pipe)
 	}
 
 	if ((src_h != pipe->dst.h) ||
-	    (pipe->pp_res.pp_sts.sharp_sts & PP_STS_ENABLE) ||
+	    (pipe->src_fmt->is_yuv &&
+			(pipe->pp_res.pp_sts.sharp_sts & PP_STS_ENABLE)) ||
 	    (chroma_sample == MDSS_MDP_CHROMA_420) ||
 	    (chroma_sample == MDSS_MDP_CHROMA_H1V2) ||
 	    (pipe->scale.enable_pxl_ext && (src_h != pipe->dst.h))) {
@@ -1141,7 +1143,8 @@ static int mdss_mdp_scale_setup(struct mdss_mdp_pipe *pipe)
 	}
 
 	if ((src_w != pipe->dst.w) ||
-	    (pipe->pp_res.pp_sts.sharp_sts & PP_STS_ENABLE) ||
+	    (pipe->src_fmt->is_yuv &&
+			(pipe->pp_res.pp_sts.sharp_sts & PP_STS_ENABLE)) ||
 	    (chroma_sample == MDSS_MDP_CHROMA_420) ||
 	    (chroma_sample == MDSS_MDP_CHROMA_H2V1) ||
 	    (pipe->scale.enable_pxl_ext && (src_w != pipe->dst.w))) {
@@ -1242,6 +1245,10 @@ static int mdss_mdp_scale_setup(struct mdss_mdp_pipe *pipe)
 		/*program pixel extn values for the SSPP*/
 		mdss_mdp_pipe_program_pixel_extn(pipe);
 	} else {
+		MDSS_XLOG(pipe->num, init_phasex, init_phasey,
+				phasex_step, phasey_step);
+		MDSS_XLOG(chroma_shift_x, chroma_shift_y, scale_config);
+
 		if (pipe->type == MDSS_MDP_PIPE_TYPE_VIG) {
 			/*program x,y initial phase and phase step*/
 			writel_relaxed(0,

@@ -20,6 +20,7 @@
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/vmalloc.h>
 
 #include "mdss.h"
 #include "mdss_mdp.h"
@@ -27,9 +28,24 @@
 #include "mdss_debug.h"
 
 #define DEFAULT_BASE_REG_CNT 0x100
-#define GROUP_BYTES 4
 #define ROW_BYTES 16
+#define GROUP_BYTES 4
 #define MAX_VSYNC_COUNT 0xFFFFFFF
+
+struct mdss_debug_dump_info {
+	char name[32];
+	char *dump_addr;
+	u32 len;
+	u8 row_bytes;
+	u8 grp_bytes;
+	struct mdss_debug_dump_info *next;
+};
+
+static struct mdss_debug_dump_info *reg_dump_info;
+static u32 reg_dump_lines;
+static u32 reg_dump_bases;
+static u32 dbg_bus_dump_lines;
+static DEFINE_MUTEX(reg_dump_info_mutex);
 
 static int mdss_debug_base_open(struct inode *inode, struct file *file)
 {
@@ -164,7 +180,7 @@ static ssize_t mdss_debug_base_reg_read(struct file *file,
 	}
 
 	if (!dbg->buf) {
-		char dump_buf[64];
+		char dump_buf[72];
 		char *ptr;
 		int cnt, tot;
 
@@ -261,6 +277,15 @@ int mdss_debug_register_base(const char *name, void __iomem *base,
 	if (name && strcmp(name, "mdp"))
 		prefix_len = snprintf(dn, sizeof(dn), "%s_", name);
 
+	if (name && !strcmp(name, "dsi0_phy"))
+		mdata->dsi0_phy_base = base;
+	else if (name && !strcmp(name, "dsi1_phy"))
+		mdata->dsi1_phy_base = base;
+	else if (name && !strcmp(name, "dsi0"))
+		mdata->dsi0_base = base;
+	else if (name && !strcmp(name, "dsi1"))
+		mdata->dsi1_base = base;
+
 	strlcpy(dn + prefix_len, "off", sizeof(dn) - prefix_len);
 	ent_off = debugfs_create_file(dn, 0644, mdd->root, dbg, &mdss_off_fops);
 	if (IS_ERR_OR_NULL(ent_off)) {
@@ -332,6 +357,131 @@ static const struct file_operations mdss_stat_fops = {
 	.open = mdss_debug_stat_open,
 	.release = mdss_debug_stat_release,
 	.read = mdss_debug_stat_read,
+};
+
+static int mdss_debug_reg_dump_open(struct inode *inode, struct file *file)
+{
+	/* non-seekable */
+	file->f_mode &= ~(FMODE_LSEEK | FMODE_PREAD | FMODE_PWRITE);
+	file->private_data = inode->i_private;
+	return 0;
+}
+
+static char *reg_dump_buf;
+static u32 reg_dump_buf_size;
+static struct ion_client *dbg_iclient;
+static struct ion_handle *dbg_ihandle;
+
+static ssize_t mdss_debug_reg_dump_read(struct file *file,
+	char __user *user_buf, size_t count, loff_t *ppos)
+{
+	size_t len;
+
+	if (!dbg_iclient) {
+		pr_err("ion_debug_client is not valid. Cannot dump\n");
+		return -EPERM;
+	}
+
+	if (!reg_dump_info) {
+		pr_err("nothing to dump\n");
+		return -EINVAL;
+	}
+
+	if (!reg_dump_buf) {
+		char dump_buf[72];
+		char *ptr;
+		int cnt, tot;
+		struct mdss_debug_dump_info *iterator = reg_dump_info;
+
+		mutex_lock(&reg_dump_info_mutex);
+
+		reg_dump_buf_size = (reg_dump_lines + reg_dump_bases +
+				     dbg_bus_dump_lines) * 72;
+
+		dbg_ihandle = ion_alloc(dbg_iclient, reg_dump_buf_size, SZ_4K,
+				ION_HEAP(ION_SYSTEM_HEAP_ID), 0);
+		if (IS_ERR_OR_NULL(dbg_ihandle)) {
+			pr_err("unable to alloc debug mem from ion - %ld\n",
+					PTR_ERR(dbg_ihandle));
+			mutex_unlock(&reg_dump_info_mutex);
+			return PTR_ERR(dbg_ihandle);
+		}
+
+		reg_dump_buf = (char *)ion_map_kernel(dbg_iclient, dbg_ihandle);
+		if (IS_ERR_OR_NULL(reg_dump_buf)) {
+			pr_err("ION memory mapping failed - %ld\n",
+				PTR_ERR(reg_dump_buf));
+			ion_free(dbg_iclient, dbg_ihandle);
+			mutex_unlock(&reg_dump_info_mutex);
+			return PTR_ERR(reg_dump_buf);
+		}
+
+		tot = 0;
+		for (;iterator;) {
+			int row_bytes = iterator->row_bytes;
+			int grp_bytes = iterator->grp_bytes;
+
+			ptr = iterator->dump_addr;
+			len = snprintf(reg_dump_buf + tot, 72,
+				"******** %s DUMP ********\n", iterator->name);
+			tot += len;
+			for (cnt = iterator->len; cnt > 0; cnt -= row_bytes) {
+
+				hex_dump_to_buffer(ptr, min(cnt, row_bytes),
+					row_bytes, grp_bytes, dump_buf,
+					sizeof(dump_buf), false);
+
+				if (row_bytes == 32)
+					len = scnprintf(reg_dump_buf + tot,
+						reg_dump_buf_size - tot, "%s\n",
+						dump_buf);
+				else
+					len = scnprintf(reg_dump_buf + tot,
+						reg_dump_buf_size - tot, "0x%08x: %s\n",
+						(unsigned int)ptr, dump_buf);
+
+				ptr += row_bytes;
+				tot += len;
+				if (tot >= reg_dump_buf_size)
+					break;
+			}
+			iterator = iterator->next;
+		}
+		reg_dump_buf_size = tot;
+
+		mutex_unlock(&reg_dump_info_mutex);
+	}
+
+	if (*ppos >= reg_dump_buf_size)
+		return 0; /* done reading */
+
+	len = min(count, reg_dump_buf_size - (size_t) *ppos);
+	if (copy_to_user(user_buf, reg_dump_buf + *ppos, len)) {
+		pr_err("failed to copy to user\n");
+		return -EFAULT;
+	}
+
+	*ppos += len; /* increase offset */
+
+	return len;
+}
+
+static int mdss_debug_reg_dump_release(struct inode *inode, struct file *file)
+{
+	if (reg_dump_buf) {
+		ion_unmap_kernel(dbg_iclient, dbg_ihandle);
+		ion_free(dbg_iclient, dbg_ihandle);
+		dbg_ihandle = NULL;
+		reg_dump_buf = NULL;
+		reg_dump_buf_size = 0;
+	}
+	return 0;
+}
+
+static const struct file_operations mdss_reg_dump_fops = {
+	.open = mdss_debug_reg_dump_open,
+	.read = mdss_debug_reg_dump_read,
+	.release = mdss_debug_reg_dump_release,
 };
 
 static ssize_t mdss_debug_factor_write(struct file *file,
@@ -493,6 +643,9 @@ int mdss_debugfs_init(struct mdss_data_type *mdata)
 		goto err;
 	}
 	debugfs_create_file("stat", 0644, mdd->root, mdata, &mdss_stat_fops);
+	debugfs_create_file("reg_dump", 0644, mdd->root, mdd, &mdss_reg_dump_fops);
+	debugfs_create_bool("serialize_wait4pp", 0644, mdd->root,
+		(u32 *)&mdata->serialize_wait4pp);
 
 	mdd->perf = debugfs_create_dir("perf", mdd->root);
 	if (IS_ERR_OR_NULL(mdd->perf)) {
@@ -507,6 +660,13 @@ int mdss_debugfs_init(struct mdss_data_type *mdata)
 		goto err;
 
 	mdata->debug_inf.debug_data = mdd;
+
+	dbg_iclient = msm_ion_client_create(-1 , "mdss_debug_iclient");
+	if (IS_ERR_OR_NULL(dbg_iclient)) {
+		pr_err("Err:client not created, val %d\n",
+			PTR_RET(dbg_iclient));
+		dbg_iclient = NULL;
+	}
 
 	return 0;
 
@@ -525,16 +685,57 @@ int mdss_debugfs_remove(struct mdss_data_type *mdata)
 	return 0;
 }
 
-void mdss_dump_reg(char __iomem *base, int len)
+void mdss_dump_reg(const char *name, char __iomem *base, int len, bool dump_in_memory)
 {
 	char *addr;
 	u32 x0, x4, x8, xc;
 	int i;
+	u32 *dump_addr;
 
 	addr = base;
 	if (len % 16)
 		len += 16;
 	len /= 16;
+
+	if (dump_in_memory) {
+		struct mdss_debug_dump_info *dump_info =
+			kzalloc(sizeof(struct mdss_debug_dump_info), GFP_KERNEL);
+		if (!dump_info) {
+			pr_err("failed to allocate memory for reg_dump_info\n");
+			return;
+		}
+
+		/* 16Byte for x0 + x4 +x8 +xc */
+		dump_addr = kzalloc(len * 16, GFP_KERNEL);
+		if (!dump_addr) {
+			pr_err("failed to allocate register dump memory\n");
+			return;
+		}
+
+		mutex_lock(&reg_dump_info_mutex);
+
+		strlcpy(dump_info->name, name, sizeof(dump_info->name));
+		dump_info->dump_addr = (char *)dump_addr;
+		dump_info->len = len * 16;
+		dump_info->row_bytes = ROW_BYTES;
+		dump_info->grp_bytes = GROUP_BYTES;
+
+		reg_dump_lines += len;
+		reg_dump_bases++;
+		if (!reg_dump_info) {
+			reg_dump_info = dump_info;
+		} else {
+			struct mdss_debug_dump_info *iterator = reg_dump_info;
+
+			for (;iterator && iterator->next;)
+				iterator = iterator->next;
+			iterator->next = dump_info;
+		}
+		pr_info("start_address:%p end_address:%p\n", dump_addr,
+			dump_addr + dump_info->len);
+
+		mutex_unlock(&reg_dump_info_mutex);
+	}
 
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
 	for (i = 0; i < len; i++) {
@@ -542,10 +743,391 @@ void mdss_dump_reg(char __iomem *base, int len)
 		x4 = readl_relaxed(addr+0x4);
 		x8 = readl_relaxed(addr+0x8);
 		xc = readl_relaxed(addr+0xc);
-		pr_info("%p : %08x %08x %08x %08x\n", addr, x0, x4, x8, xc);
+		if (!dump_in_memory) {
+			pr_info("%p : %08x %08x %08x %08x\n", addr, x0, x4, x8, xc);
+		} else {
+			dump_addr[i*4] = x0;
+			dump_addr[i*4 + 1] = x4;
+			dump_addr[i*4 + 2] = x8;
+			dump_addr[i*4 + 3] = xc;
+		}
+
 		addr += 16;
 	}
 	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
+}
+
+#define MAX_DBG_BUS_TEST_POINTS 4
+enum mdss_debug_bus_type {
+	MDSS_UP_DBG_BUS,
+	MDSS_LP_DBG_BUS,
+	MDSS_MAX_DBG_BUS,
+};
+
+struct mdss_debug_bus_data {
+	u8 bus_type;
+	u8 block_id;
+	/* 0 = don't collect, 1 = collect */
+	u32 test_point[MAX_DBG_BUS_TEST_POINTS];
+};
+
+static struct mdss_debug_bus_data dbg_bus_list[] = {
+	{MDSS_UP_DBG_BUS,   4, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  24, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  42, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  88, {1, 1, 0, 0}},
+
+	{MDSS_UP_DBG_BUS,  12, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  34, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  52, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  96, {1, 1, 0, 0}},
+
+	{MDSS_UP_DBG_BUS,   5, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  25, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  43, {1, 1, 0, 0}},
+	{MDSS_UP_DBG_BUS,  89, {1, 1, 0, 0}},
+
+	{MDSS_UP_DBG_BUS,   6, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  26, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  44, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  90, {1, 0, 0, 0}},
+
+	{MDSS_UP_DBG_BUS,   7, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  27, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  45, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  91, {1, 1, 1, 0}},
+
+	{MDSS_UP_DBG_BUS,  13, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  35, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  53, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  97, {1, 1, 1, 0}},
+
+	{MDSS_UP_DBG_BUS,  58, {1, 1, 1, 0}},
+	{MDSS_UP_DBG_BUS,  65, {1, 1, 1, 0}},
+
+	{MDSS_LP_DBG_BUS,  14, {1, 1, 1, 0}},
+	{MDSS_LP_DBG_BUS,  20, {1, 1, 1, 0}},
+	{MDSS_LP_DBG_BUS,  26, {1, 1, 1, 0}},
+	{MDSS_LP_DBG_BUS,   4, {1, 1, 1, 0}},
+
+	{MDSS_LP_DBG_BUS,  18, {0, 1, 0, 0}},
+	{MDSS_LP_DBG_BUS,  24, {0, 1, 0, 0}},
+	{MDSS_LP_DBG_BUS,  30, {0, 1, 0, 0}},
+	{MDSS_LP_DBG_BUS,   8, {0, 1, 0, 0}},
+
+	{MDSS_LP_DBG_BUS,  31, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  33, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  35, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  43, {1, 0, 0, 0}},
+
+	{MDSS_LP_DBG_BUS,  32, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  34, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  36, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  42, {1, 0, 0, 0}},
+
+	{MDSS_UP_DBG_BUS,   0, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,   8, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  20, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  30, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  38, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  48, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  54, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  61, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  84, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS,  92, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS, 111, {0, 0, 0, 1}},
+	{MDSS_UP_DBG_BUS, 118, {0, 0, 0, 1}},
+
+	{MDSS_UP_DBG_BUS,  29, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  37, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  47, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  60, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS,  67, {1, 0, 0, 0}},
+	{MDSS_UP_DBG_BUS, 107, {1, 0, 0, 0}},
+
+	{MDSS_LP_DBG_BUS,  63, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  64, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  65, {1, 0, 0, 0}},
+	{MDSS_LP_DBG_BUS,  75, {1, 0, 0, 0}},
+};
+
+static void mdss_dump_mdp_debug_bus(bool dump_in_memory)
+{
+	u32 *dump_addr;
+	u32 dump_cnt = 0;
+	int i, j;
+	int list_items = sizeof(dbg_bus_list)/sizeof(struct mdss_debug_bus_data);
+	int size = list_items * ALIGN(sizeof(struct mdss_debug_bus_data), 32);
+	struct mdss_data_type *mdata = mdss_res;
+
+	if (!mdata || !mdata->mdp_base)
+		return;
+
+	if (dump_in_memory) {
+		struct mdss_debug_dump_info *dump_info =
+			kzalloc(sizeof(struct mdss_debug_dump_info), GFP_KERNEL);
+		if (!dump_info) {
+			pr_err("failed to allocate memory for reg_dump_info\n");
+			return;
+		}
+
+		dump_addr = kzalloc(size, GFP_KERNEL);
+		if (!dump_addr) {
+			pr_err("failed to allocate register dump memory\n");
+			return;
+		}
+
+		mutex_lock(&reg_dump_info_mutex);
+
+		strlcpy(dump_info->name, "MDP debug bus", sizeof(dump_info->name));
+		dump_info->dump_addr = (char *)dump_addr;
+		dump_info->len = size;
+		dump_info->row_bytes = 32;
+		dump_info->grp_bytes = 4;
+
+		dbg_bus_dump_lines += list_items;
+		if (!reg_dump_info) {
+			reg_dump_info = dump_info;
+		} else {
+			struct mdss_debug_dump_info *iterator = reg_dump_info;
+
+			for (;iterator && iterator->next;)
+				iterator = iterator->next;
+			iterator->next = dump_info;
+		}
+		pr_info("mdp debug bus dump start_address:%p end_address:%p\n",
+			dump_addr, dump_addr + dump_info->len);
+
+		mutex_unlock(&reg_dump_info_mutex);
+	}
+
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
+	pr_debug("number of dbg bus items %d\n", list_items);
+	for (i = 0; i < list_items; i++) {
+		u32 tp_val[MAX_DBG_BUS_TEST_POINTS];
+		u32 ctrl_reg_offset, status_reg_offset;
+		struct mdss_debug_bus_data *item = &dbg_bus_list[i];
+
+		/* turn off all debugbus first */
+		writel_relaxed(0, mdata->mdp_base + MDSS_MDP_SMP_DEBUGBUS_CTRL);
+		writel_relaxed(0, mdata->mdp_base + MDSS_MDP_UP_DEBUGBUS_CTRL);
+		writel_relaxed(0, mdata->mdp_base + MDSS_MDP_LP_DEBUGBUS_CTRL);
+
+		if (item->bus_type == MDSS_UP_DBG_BUS) {
+			ctrl_reg_offset = MDSS_MDP_UP_DEBUGBUS_CTRL;
+			status_reg_offset = MDSS_MDP_UP_DEBUGBUS_STATUS;
+		} else if (item->bus_type == MDSS_LP_DBG_BUS) {
+			ctrl_reg_offset = MDSS_MDP_LP_DEBUGBUS_CTRL;
+			status_reg_offset = MDSS_MDP_LP_DEBUGBUS_STATUS;
+		} else {
+			pr_err("unsupported debug bus type %d\n", i);
+			continue;
+		}
+
+		for (j = 0; j < MAX_DBG_BUS_TEST_POINTS; j++) {
+			u32 ctrl_val, tg_sel = j;
+			/* skip if tp read is not needed */
+			if (item->test_point[j] == 0) {
+				tp_val[j] = 0xFFFFFFFF;
+				continue;
+			}
+
+			if (j == 2)
+				tg_sel = 3;
+			else if (j == 3)
+				tg_sel = 6;
+
+			ctrl_val = 1 | (tg_sel << 1) | (item->block_id << 4);
+			writel_relaxed(ctrl_val,
+				mdata->mdss_base + ctrl_reg_offset);
+			tp_val[j] = readl_relaxed(mdata->mdss_base + status_reg_offset);
+			pr_debug("ctrl: off=0x%x val=0x%x status:off=0x%x val=0x%x\n",
+				ctrl_reg_offset, ctrl_val,
+				status_reg_offset, tp_val[j]);
+		}
+		if (!dump_in_memory) {
+			pr_info("dbg_bus_type:%d: block_id:%d tp0:0x%08x tp1:0x%08x tp3:0x%08x tp6:0x%08x\n",
+				i, item->block_id,
+				tp_val[0], tp_val[1], tp_val[2], tp_val[3]);
+		} else {
+			dump_addr[dump_cnt++] = item->bus_type;
+			dump_addr[dump_cnt++] = item->block_id;
+
+			for (j = 0; j < MAX_DBG_BUS_TEST_POINTS; j++)
+				dump_addr[dump_cnt++] = tp_val[j];
+
+			dump_addr[dump_cnt++] = 0xFFFFFFFF;
+			dump_addr[dump_cnt++] = 0xFFFFFFFF;
+		}
+	}
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
+}
+
+struct mdss_dsi_debug_bus_data {
+	/*
+	 * write0_off;
+	 * write0_val;
+	 * write1_off;
+	 * write1_val;
+	 * read0;
+	 * read1;
+	 * read2;
+	 * read3;
+	 */
+	u32 data[8];
+};
+
+/* value of 0 in offset and read* means don't write or read respectively */
+static struct mdss_dsi_debug_bus_data dsi_ctl_dbg_bus_list[] = {
+	{{0x124, 0x0A1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x0B1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x0C1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x0D1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x0F1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x101, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x1C1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x1D1, 0, 0, 0x128, 0, 0, 0}},
+	{{0x124, 0x1E1, 0, 0, 0x128, 0, 0, 0}}
+};
+
+/* value of 0 in offset and read* means don't write or read respectively */
+static struct mdss_dsi_debug_bus_data dsi_phy_dbg_bus_list[] = {
+	{{0x1D8, 0x07, 0x18, 0x19, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x18, 0x1a, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x18, 0x1b, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+
+	{{0x018, 0x00, 0x58, 0x19, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x58, 0x1a, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x58, 0x1b, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+
+	{{0x058, 0x00, 0x98, 0x19, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x98, 0x1a, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x98, 0x1b, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+
+	{{0x098, 0x00, 0xD8, 0x19, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0xD8, 0x1a, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0xD8, 0x1b, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+
+	{{0x0D8, 0x00, 0x118, 0x19, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x118, 0x1a, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+	{{0x000, 0x00, 0x118, 0x1b, 0x1F0, 0x1F4, 0x1F8, 0x1FC}},
+
+	{{0x118, 0x00, 0x1D8, 0x00, 0x000, 0x000, 0x000, 0x000}}
+};
+
+static void mdss_dump_dsi_debug_bus(bool dump_in_memory, const char *name,
+	char __iomem *base)
+{
+	u32 *dump_addr;
+	u32 dump_cnt = 0;
+	int i, j;
+	int list_items = 0, size = 0, temp_size = 0;
+	struct mdss_dsi_debug_bus_data *list = NULL;
+
+	if (!name || !base)
+		return;
+
+	if (!strcmp(name, "dsi0_phy") || !strcmp(name, "dsi1_phy")) {
+		temp_size = sizeof(dsi_phy_dbg_bus_list);
+		list = dsi_phy_dbg_bus_list;
+	} else if (!strcmp(name, "dsi0") || !strcmp(name, "dsi1")) {
+		temp_size = sizeof(dsi_ctl_dbg_bus_list);
+		list = dsi_ctl_dbg_bus_list;
+	} else {
+		pr_err("unsupported dump type %s \n", name);
+		return;
+	}
+
+	list_items = temp_size / sizeof(struct mdss_dsi_debug_bus_data);
+	size = list_items * ALIGN(sizeof(struct mdss_dsi_debug_bus_data), 32);
+
+	if (dump_in_memory) {
+		struct mdss_debug_dump_info *dump_info =
+			kzalloc(sizeof(struct mdss_debug_dump_info), GFP_KERNEL);
+		if (!dump_info) {
+			pr_err("failed to allocate memory for reg_dump_info\n");
+			return;
+		}
+
+		dump_addr = kzalloc(size, GFP_KERNEL);
+		if (!dump_addr) {
+			pr_err("failed to allocate register dump memory\n");
+			return;
+		}
+
+		mutex_lock(&reg_dump_info_mutex);
+
+		snprintf(dump_info->name, sizeof(dump_info->name),
+			"%s debug bus", name);
+		dump_info->dump_addr = (char *)dump_addr;
+		dump_info->len = size;
+		dump_info->row_bytes = 32;
+		dump_info->grp_bytes = 4;
+
+		dbg_bus_dump_lines += list_items;
+		if (!reg_dump_info) {
+			reg_dump_info = dump_info;
+		} else {
+			struct mdss_debug_dump_info *iterator = reg_dump_info;
+
+			for (;iterator && iterator->next;)
+				iterator = iterator->next;
+			iterator->next = dump_info;
+		}
+		pr_info("%s debug bus dump start_address:%p end_address:%p\n",
+			name, dump_addr, dump_addr + dump_info->len);
+
+		mutex_unlock(&reg_dump_info_mutex);
+	}
+
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_ON, false);
+	pr_debug("number of dbg bus items %d\n", list_items);
+	for (i = 0; i < list_items; i++) {
+		struct mdss_dsi_debug_bus_data *in_item = &list[i];
+		struct mdss_dsi_debug_bus_data out_item;
+
+		memset(&out_item, 0xFF, sizeof(out_item));
+
+		for (j = 0; j < 8; j++) {
+			if (((j == 0) || (j == 2)) &&
+			    (in_item->data[j] != 0)) { /* write registers */
+				out_item.data[j] = in_item->data[j];
+				out_item.data[j+1] = in_item->data[j+1];
+				writel_relaxed(in_item->data[j+1],
+					base + in_item->data[j]);
+				j++;
+			} else if ((j > 3) && (in_item->data[j] != 0)) { /* read registers */
+				out_item.data[j]=
+					readl_relaxed(base + in_item->data[j]);
+			}
+		}
+		pr_debug("%s dbg_bus reg: 0:0x%x 1:0x%x 2:0x%x 3:0x%x 4:0x%x 5:0x%x 6:0x%x 7:0x%x\n",
+			name,
+			out_item.data[0], out_item.data[1], out_item.data[2], out_item.data[3],
+			out_item.data[4], out_item.data[5], out_item.data[6], out_item.data[7]);
+
+		if (!dump_in_memory) {
+			pr_err("%s dbg_bus reg: 0:0x%x 1:0x%x 2:0x%x 3:0x%x 4:0x%x 5:0x%x 6:0x%x 7:0x%x\n",
+				name,
+				out_item.data[0], out_item.data[1], out_item.data[2], out_item.data[3],
+				out_item.data[4], out_item.data[5], out_item.data[6], out_item.data[7]);
+		} else {
+			for (j = 0; j < 8; j++)
+				dump_addr[dump_cnt++] = out_item.data[j];
+		}
+	}
+	mdss_mdp_clk_ctrl(MDP_BLOCK_POWER_OFF, false);
+}
+
+void mdss_dump_debug_bus(bool dump_in_memory)
+{
+	struct mdss_data_type *mdata = mdss_res;
+
+	mdss_dump_mdp_debug_bus(dump_in_memory);
+	mdss_dump_dsi_debug_bus(dump_in_memory, "dsi0", mdata->dsi0_base);
+	mdss_dump_dsi_debug_bus(dump_in_memory, "dsi1", mdata->dsi1_base);
+	mdss_dump_dsi_debug_bus(dump_in_memory, "dsi0_phy", mdata->dsi0_phy_base);
+	mdss_dump_dsi_debug_bus(dump_in_memory, "dsi1_phy", mdata->dsi1_phy_base);
 }
 
 int vsync_count;
