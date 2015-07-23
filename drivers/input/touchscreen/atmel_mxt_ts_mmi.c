@@ -229,7 +229,7 @@ struct t9_range {
 #define MXT_CRC_TIMEOUT		2000	/* msec */
 #define MXT_FW_RESET_TIME	3500	/* msec */
 #define MXT_FW_CHG_TIMEOUT	300	/* msec */
-#define MXT_WAKEUP_TIME		25	/* msec */
+#define MXT_WAKEUP_TIME		50	/* msec */
 #define MXT_REGULATOR_DELAY	150	/* msec */
 #define MXT_POWERON_DELAY	150	/* msec */
 
