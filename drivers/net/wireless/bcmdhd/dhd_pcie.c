@@ -55,6 +55,7 @@
 #ifdef DHDTCPACK_SUPPRESS
 #include <dhd_ip.h>
 #endif /* DHDTCPACK_SUPPRESS */
+#include <proto/bcmevent.h>
 
 #ifdef BCMEMBEDIMAGE
 #include BCMEMBEDIMAGE
@@ -1838,9 +1839,9 @@ done:
 
 /* Process rx frame , Send up the layer to netif */
 void BCMFASTPATH
-dhd_bus_rx_frame(struct dhd_bus *bus, void* pkt, int ifidx, uint pkt_count)
+dhd_bus_rx_frame(struct dhd_bus *bus, void* pkt, int ifidx, uint pkt_count, int pkt_wake)
 {
-	dhd_rx_frame(bus->dhd, ifidx, pkt, pkt_count, 0);
+	dhd_rx_frame(bus->dhd, ifidx, pkt, pkt_count, 0, pkt_wake, &bus->wake_counts);
 }
 
 #if defined(CONFIG_ARCH_MSM) && defined(CONFIG_64BIT)
@@ -3397,8 +3398,26 @@ void dhd_bus_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 
 #ifdef DHD_WAKE_STATUS
 	bcm_bprintf(strbuf, "wake %u rxwake %u readctrlwake %u\n",
-		    bcmpcie_get_total_wake(dhdp->bus), dhdp->bus->rxwake,
-		    dhdp->bus->rcwake);
+		    bcmpcie_get_total_wake(dhdp->bus), dhdp->bus->wake_counts.rxwake,
+		    dhdp->bus->wake_counts.rcwake);
+#ifdef DHD_WAKE_RX_STATUS
+	bcm_bprintf(strbuf, " unicast %u muticast %u broadcast %u arp %u\n",
+		    dhdp->bus->wake_counts.rx_ucast, dhdp->bus->wake_counts.rx_mcast,
+		    dhdp->bus->wake_counts.rx_bcast, dhdp->bus->wake_counts.rx_arp);
+	bcm_bprintf(strbuf, " multi4 %u multi6 %u icmp6 %u multiother %u\n",
+		    dhdp->bus->wake_counts.rx_multi_ipv4, dhdp->bus->wake_counts.rx_multi_ipv6,
+		    dhdp->bus->wake_counts.rx_icmpv6, dhdp->bus->wake_counts.rx_multi_other);
+	bcm_bprintf(strbuf, " icmp6_ra %u, icmp6_na %u, icmp6_ns %u\n",
+			dhdp->bus->wake_counts.rx_icmpv6_ra, dhdp->bus->wake_counts.rx_icmpv6_na,
+			dhdp->bus->wake_counts.rx_icmpv6_ns);
+#endif
+#ifdef DHD_WAKE_EVENT_STATUS
+	for (flowid = 0; flowid < WLC_E_LAST; flowid++)
+		if (dhdp->bus->wake_counts.rc_event[flowid] != 0)
+			bcm_bprintf(strbuf, " %s = %u\n", bcmevent_get_name(flowid),
+				    dhdp->bus->wake_counts.rc_event[flowid]);
+	bcm_bprintf(strbuf, "\n");
+#endif
 #endif
 	dhd_prot_print_info(dhdp, strbuf);
 	for (flowid = 0; flowid < dhdp->num_flow_rings; flowid++) {

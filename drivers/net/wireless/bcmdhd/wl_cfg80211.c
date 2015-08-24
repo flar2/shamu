@@ -430,6 +430,8 @@ static s32 wl_notify_gscan_event(struct bcm_cfg80211 *wl, bcm_struct_cfgdev *cfg
 static s32 wl_handle_roam_exp_event(struct bcm_cfg80211 *wl, bcm_struct_cfgdev *cfgdev,
 	const wl_event_msg_t *e, void *data);
 #endif /* GSCAN_SUPPORT */
+static s32 wl_handle_rssi_monitor_event(struct bcm_cfg80211 *wl, bcm_struct_cfgdev *cfgdev,
+	const wl_event_msg_t *e, void *data);
 static s32 wl_notifier_change_state(struct bcm_cfg80211 *cfg, struct net_info *_net_info,
 	enum wl_status state, bool set);
 
@@ -7413,6 +7415,10 @@ wl_cfg80211_sched_scan_start(struct wiphy *wiphy,
 				ssids_local[ssid_cnt].hidden = FALSE;
 				WL_PNO((">>> PNO non-hidden SSID (%s) \n", ssid->ssid));
 			}
+			if (request->match_sets[i].rssi_thold != NL80211_SCAN_RSSI_THOLD_OFF) {
+				ssids_local[ssid_cnt].rssi_thresh =
+				      (int8)request->match_sets[i].rssi_thold;
+			}
 			ssid_cnt++;
 		}
 	}
@@ -8165,7 +8171,8 @@ static bool wl_is_linkdown(struct bcm_cfg80211 *cfg, const wl_event_msg_t *e)
 	event == WLC_E_DISASSOC ||
 	event == WLC_E_DEAUTH) {
 #if (WL_DBG_LEVEL > 0)
-	WL_ERR(("Link down Reason : WLC_E_%s\n", wl_dbg_estr[event]));
+	WL_ERR(("Link down Reason : WLC_E_%s reason = %d status = %d\n", wl_dbg_estr[event],
+	    ntoh32(e->reason), ntoh32(e->status)));
 #endif /* (WL_DBG_LEVEL > 0) */
 		return true;
 	} else if (event == WLC_E_LINK) {
@@ -8617,6 +8624,32 @@ wl_handle_roam_exp_event(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	return BCME_OK;
 }
 #endif /* GSCAN_SUPPORT */
+
+static s32 wl_handle_rssi_monitor_event(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
+	const wl_event_msg_t *e, void *data)
+{
+	u32 datalen = be32_to_cpu(e->datalen);
+	struct net_device *ndev = cfgdev_to_wlc_ndev(cfgdev, cfg);
+	struct wiphy *wiphy = bcmcfg_to_wiphy(cfg);
+
+	if (datalen) {
+		wl_rssi_monitor_evt_t *evt_data = (wl_rssi_monitor_evt_t *)data;
+		if (evt_data->version == RSSI_MONITOR_VERSION) {
+			dhd_rssi_monitor_evt_t monitor_data;
+			monitor_data.version = DHD_RSSI_MONITOR_EVT_VERSION;
+			monitor_data.cur_rssi = evt_data->cur_rssi;
+			memcpy(&monitor_data.BSSID, &e->addr, ETHER_ADDR_LEN);
+			wl_cfgvendor_send_async_event(wiphy, ndev,
+				GOOGLE_RSSI_MONITOR_EVENT,
+				&monitor_data, sizeof(monitor_data));
+		} else {
+			WL_ERR(("Version mismatch %d, expected %d", evt_data->version,
+			       RSSI_MONITOR_VERSION));
+		}
+	}
+	return BCME_OK;
+}
+
 
 static s32
 wl_notify_roaming_status(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
@@ -9619,8 +9652,8 @@ wl_notify_sched_scan_results(struct bcm_cfg80211 *cfg, struct net_device *ndev,
 				err = -EINVAL;
 				goto out_err;
 			}
-			WL_PNO((">>> SSID:%s Channel:%d \n",
-				netinfo->pfnsubnet.SSID, netinfo->pfnsubnet.channel));
+			printk(">>> SSID:%s Channel:%d \n",
+				netinfo->pfnsubnet.SSID, netinfo->pfnsubnet.channel);
 			/* PFN result doesn't have all the info which are required by the supplicant
 			 * (For e.g IEs) Do a target Escan so that sched scan results are reported
 			 * via wl_inform_single_bss in the required format. Escan does require the
@@ -9748,6 +9781,7 @@ static void wl_init_event_handler(struct bcm_cfg80211 *cfg)
 	cfg->evt_handler[WLC_E_GAS_FRAGMENT_RX] = wl_notify_gscan_event;
 	cfg->evt_handler[WLC_E_ROAM_EXP_EVENT] = wl_handle_roam_exp_event;
 #endif /* GSCAN_SUPPORT */
+	cfg->evt_handler[WLC_E_RSSI_LQM] = wl_handle_rssi_monitor_event;
 #ifdef WLTDLS
 	cfg->evt_handler[WLC_E_TDLS_PEER_EVENT] = wl_tdls_event_handler;
 #endif /* WLTDLS */

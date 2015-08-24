@@ -800,6 +800,50 @@ static ssize_t kgsl_pwrctrl_bus_split_store(struct device *dev,
 	return count;
 }
 
+static ssize_t kgsl_pwrctrl_default_pwrlevel_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
+{
+	struct kgsl_device *device = kgsl_device_from_dev(dev);
+	if (device == NULL)
+		return 0;
+	return snprintf(buf, PAGE_SIZE, "%d\n",
+		device->pwrctrl.default_pwrlevel);
+}
+
+static ssize_t kgsl_pwrctrl_default_pwrlevel_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t count)
+{
+	struct kgsl_device *device = kgsl_device_from_dev(dev);
+	struct kgsl_pwrctrl *pwr;
+	struct kgsl_pwrscale *pwrscale;
+	int ret;
+	unsigned int level = 0;
+
+	if (device == NULL)
+		return 0;
+
+	pwr = &device->pwrctrl;
+	pwrscale = &device->pwrscale;
+
+	ret = kgsl_sysfs_store(buf, &level);
+	if (ret)
+		return ret;
+
+	if (level > pwr->num_pwrlevels - 2)
+		goto done;
+
+	mutex_lock(&device->mutex);
+	pwr->default_pwrlevel = level;
+	pwrscale->profile.initial_freq
+			= pwr->pwrlevels[level].gpu_freq;
+
+	mutex_unlock(&device->mutex);
+done:
+	return count;
+}
+
 static DEVICE_ATTR(gpuclk, 0644, kgsl_pwrctrl_gpuclk_show,
 	kgsl_pwrctrl_gpuclk_store);
 static DEVICE_ATTR(max_gpuclk, 0644, kgsl_pwrctrl_max_gpuclk_show,
@@ -843,9 +887,12 @@ static DEVICE_ATTR(force_bus_on, 0644,
 static DEVICE_ATTR(force_rail_on, 0644,
 	kgsl_pwrctrl_force_rail_on_show,
 	kgsl_pwrctrl_force_rail_on_store);
-DEVICE_ATTR(bus_split, 0644,
+static DEVICE_ATTR(bus_split, 0644,
 	kgsl_pwrctrl_bus_split_show,
 	kgsl_pwrctrl_bus_split_store);
+static DEVICE_ATTR(default_pwrlevel, 0644,
+	kgsl_pwrctrl_default_pwrlevel_show,
+	kgsl_pwrctrl_default_pwrlevel_store);
 
 static const struct device_attribute *pwrctrl_attr_list[] = {
 	&dev_attr_gpuclk,
@@ -865,6 +912,7 @@ static const struct device_attribute *pwrctrl_attr_list[] = {
 	&dev_attr_force_bus_on,
 	&dev_attr_force_rail_on,
 	&dev_attr_bus_split,
+	&dev_attr_default_pwrlevel,
 	NULL
 };
 
@@ -1261,8 +1309,6 @@ void kgsl_pwrctrl_close(struct kgsl_device *device)
  */
 void kgsl_idle_check(struct work_struct *work)
 {
-	int delay = INIT_UDELAY;
-	int requested_state;
 	struct kgsl_device *device = container_of(work, struct kgsl_device,
 							idle_check_ws);
 	WARN_ON(device == NULL);
@@ -1273,30 +1319,9 @@ void kgsl_idle_check(struct work_struct *work)
 
 	if (device->state == KGSL_STATE_ACTIVE
 		   || device->state ==  KGSL_STATE_NAP) {
-		/*
-		 * If no user is explicitly trying to use the GPU
-		 * (active_cnt is zero), then loop with increasing delay,
-		 * waiting for the GPU to become idle.
-		 */
-		while (!atomic_read(&device->active_cnt) &&
-			(delay < MAX_UDELAY)) {
-			requested_state = device->requested_state;
-			if (!kgsl_pwrctrl_sleep(device))
-				break;
-			/*
-			 * If no new commands have been issued since the
-			 * last interrupt, stay in this loop waiting for
-			 * the GPU to become idle.
-			 */
-			if (!device->pwrctrl.irq_last)
-				break;
-			kgsl_pwrctrl_request_state(device, requested_state);
-			mutex_unlock(&device->mutex);
-			udelay(delay);
-			delay *= 2;
-			mutex_lock(&device->mutex);
-		}
 
+		if (!atomic_read(&device->active_cnt))
+			kgsl_pwrctrl_sleep(device);
 
 		kgsl_pwrctrl_request_state(device, KGSL_STATE_NONE);
 		if (device->state == KGSL_STATE_ACTIVE) {
@@ -1313,8 +1338,6 @@ void kgsl_idle_check(struct work_struct *work)
 				kgsl_pwrctrl_busy_time(device, true);
 				device->pwrctrl.clk_stats.no_nap_cnt = 0;
 			}
-		} else {
-			device->pwrctrl.irq_last = 0;
 		}
 	}
 

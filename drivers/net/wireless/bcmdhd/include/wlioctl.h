@@ -386,7 +386,8 @@ typedef struct wlc_ssid {
 typedef struct wlc_ssid_ext {
 	bool       hidden;
 	uint16     flags;
-	uint16	   SSID_len;
+	uint8	   SSID_len;
+	int8	   rssi_thresh;
 	uchar		SSID[DOT11_MAX_SSID_LEN];
 } wlc_ssid_ext_t;
 
@@ -3358,6 +3359,21 @@ typedef struct wl_rssi_event {
 						 * beacons/packets crosses a level.
 						 */
 } wl_rssi_event_t;
+
+#define RSSI_MONITOR_VERSION    1
+#define RSSI_MONITOR_STOP       (1 << 0)
+typedef struct wl_rssi_monitor_cfg {
+	uint8 version;
+	uint8 flags;
+	int8 max_rssi;
+	int8 min_rssi;
+}wl_rssi_monitor_cfg_t;
+
+typedef struct wl_rssi_monitor_evt {
+	uint8 version;
+	int8 cur_rssi;
+	uint16 pad;
+} wl_rssi_monitor_evt_t;
 
 typedef struct wl_action_obss_coex_req {
 	uint8 info;
