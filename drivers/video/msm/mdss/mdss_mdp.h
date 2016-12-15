@@ -72,6 +72,22 @@ enum mdss_mdp_perf_state_type {
 	PERF_HW_MDP_STATE,
 };
 
+struct kcal_lut_data {
+    int red;
+    int green;
+    int blue;
+    int minimum;
+    int enable;
+    int invert;
+    int sat;
+    int hue;
+    int val;
+    int cont;
+};
+
+void kcal_ext_apply_values(int red, int green, int blue);
+struct kcal_lut_data kcal_ext_show_values(void);
+
 enum mdss_mdp_block_power_state {
 	MDP_BLOCK_POWER_OFF = 0,
 	MDP_BLOCK_POWER_ON = 1,
