@@ -400,6 +400,9 @@ static inline int xfrm_replay_verify_len(struct xfrm_replay_state_esn *replay_es
 	if (up->replay_window > up->bmp_len * sizeof(__u32) * 8)
 		return -EINVAL;
 
+	if (up->replay_window > up->bmp_len * sizeof(__u32) * 8)
+		return -EINVAL;
+
 	return 0;
 }
 
@@ -2369,7 +2372,7 @@ static int xfrm_user_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	link = &xfrm_dispatch[type];
 
 	/* All operations require privileges, even GET */
-	if (!ns_capable(net->user_ns, CAP_NET_ADMIN))
+	if (!netlink_net_capable(skb, CAP_NET_ADMIN))
 		return -EPERM;
 
 	if ((type == (XFRM_MSG_GETSA - XFRM_MSG_BASE) ||

@@ -55,7 +55,7 @@ static inline size_t buffer_start_add(struct persistent_ram_zone *prz, size_t a)
 	do {
 		old = atomic_read(&prz->buffer->start);
 		new = old + a;
-		while (unlikely(new > prz->buffer_size))
+		while (unlikely(new >= prz->buffer_size))
 			new -= prz->buffer_size;
 	} while (atomic_cmpxchg(&prz->buffer->start, old, new) != old);
 
@@ -253,7 +253,7 @@ static void notrace persistent_ram_update(struct persistent_ram_zone *prz,
 	const void *s, unsigned int start, unsigned int count)
 {
 	struct persistent_ram_buffer *buffer = prz->buffer;
-	memcpy(buffer->data + start, s, count);
+	memcpy_toio(buffer->data + start, s, count);
 	persistent_ram_update_ecc(prz, start, count);
 }
 
@@ -424,8 +424,8 @@ void persistent_ram_save_old(struct persistent_ram_zone *prz)
 	}
 
 	prz->old_log_size = size;
-	memcpy(prz->old_log, &buffer->data[start], size - start);
-	memcpy(prz->old_log + size - start, &buffer->data[0], start);
+	memcpy_fromio(prz->old_log, &buffer->data[start], size - start);
+	memcpy_fromio(prz->old_log + size - start, &buffer->data[0], start);
 }
 
 int notrace persistent_ram_write(struct persistent_ram_zone *prz,
@@ -526,7 +526,7 @@ static void *persistent_ram_vmap(phys_addr_t start, size_t size)
 	page_start = start - offset_in_page(start);
 	page_count = DIV_ROUND_UP(size + offset_in_page(start), PAGE_SIZE);
 
-	prot = pgprot_noncached(PAGE_KERNEL);
+	prot = pgprot_writecombine(PAGE_KERNEL);
 
 	pages = kmalloc(sizeof(struct page *) * page_count, GFP_KERNEL);
 	if (!pages) {
@@ -553,7 +553,7 @@ static void *persistent_ram_iomap(phys_addr_t start, size_t size)
 		return NULL;
 	}
 
-	return ioremap(start, size);
+	return ioremap_wc(start, size);
 }
 
 static int persistent_ram_buffer_map(phys_addr_t start, phys_addr_t size,

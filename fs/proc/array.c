@@ -304,19 +304,16 @@ static void render_cap_t(struct seq_file *m, const char *header,
 	seq_puts(m, header);
 	CAP_FOR_EACH_U32(__capi) {
 		seq_printf(m, "%08x",
-			   a->cap[(_KERNEL_CAPABILITY_U32S-1) - __capi]);
+			   a->cap[CAP_LAST_U32 - __capi]);
 	}
 	seq_putc(m, '\n');
 }
 
-/* Remove non-existent capabilities */
-#define NORM_CAPS(v) (v.cap[CAP_TO_INDEX(CAP_LAST_CAP)] &= \
-				CAP_TO_MASK(CAP_LAST_CAP + 1) - 1)
-
 static inline void task_cap(struct seq_file *m, struct task_struct *p)
 {
 	const struct cred *cred;
-	kernel_cap_t cap_inheritable, cap_permitted, cap_effective, cap_bset;
+	kernel_cap_t cap_inheritable, cap_permitted, cap_effective,
+			cap_bset, cap_ambient;
 
 	rcu_read_lock();
 	cred = __task_cred(p);
@@ -324,17 +321,14 @@ static inline void task_cap(struct seq_file *m, struct task_struct *p)
 	cap_permitted	= cred->cap_permitted;
 	cap_effective	= cred->cap_effective;
 	cap_bset	= cred->cap_bset;
+	cap_ambient	= cred->cap_ambient;
 	rcu_read_unlock();
-
-	NORM_CAPS(cap_inheritable);
-	NORM_CAPS(cap_permitted);
-	NORM_CAPS(cap_effective);
-	NORM_CAPS(cap_bset);
 
 	render_cap_t(m, "CapInh:\t", &cap_inheritable);
 	render_cap_t(m, "CapPrm:\t", &cap_permitted);
 	render_cap_t(m, "CapEff:\t", &cap_effective);
 	render_cap_t(m, "CapBnd:\t", &cap_bset);
+	render_cap_t(m, "CapAmb:\t", &cap_ambient);
 }
 
 static inline void task_seccomp(struct seq_file *m, struct task_struct *p)
@@ -407,7 +401,7 @@ static int do_task_stat(struct seq_file *m, struct pid_namespace *ns,
 
 	state = *get_task_state(task);
 	vsize = eip = esp = 0;
-	permitted = ptrace_may_access(task, PTRACE_MODE_READ | PTRACE_MODE_NOAUDIT);
+	permitted = ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS | PTRACE_MODE_NOAUDIT);
 	mm = get_task_mm(task);
 	if (mm) {
 		vsize = task_vsize(mm);

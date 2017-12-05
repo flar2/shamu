@@ -139,7 +139,7 @@ EXPORT_SYMBOL_GPL(vm_memory_committed);
  */
 int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
 {
-	unsigned long free, allowed, reserve;
+	long free, allowed, reserve;
 
 	vm_acct_memory(pages);
 
@@ -205,7 +205,7 @@ int __vm_enough_memory(struct mm_struct *mm, long pages, int cap_sys_admin)
 	 */
 	if (mm) {
 		reserve = sysctl_user_reserve_kbytes >> (PAGE_SHIFT - 10);
-		allowed -= min(mm->total_vm / 32, reserve);
+		allowed -= min_t(long, mm->total_vm / 32, reserve);
 	}
 
 	if (percpu_counter_read_positive(&vm_committed_as) < allowed)
@@ -2149,16 +2149,19 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 	if (!(vma->vm_flags & VM_GROWSUP))
 		return -EFAULT;
 
-	/* Guard against wrapping around to address 0. */
+	/* Guard against exceeding limits of the address space. */
 	address &= PAGE_MASK;
-	address += PAGE_SIZE;
-	if (!address)
+	if (address >= TASK_SIZE)
 		return -ENOMEM;
+	address += PAGE_SIZE;
 
 	/* Enforce stack_guard_gap */
 	gap_addr = address + stack_guard_gap;
-	if (gap_addr < address)
-		return -ENOMEM;
+
+	/* Guard against overflow */
+	if (gap_addr < address || gap_addr > TASK_SIZE)
+		gap_addr = TASK_SIZE;
+
 	next = vma->vm_next;
 	if (next && next->vm_start < gap_addr) {
 		if (!(next->vm_flags & VM_GROWSUP))

@@ -74,18 +74,17 @@ extern void chroot_fs_refs(const struct path *, const struct path *);
 /*
  * file_table.c
  */
-extern void file_sb_list_add(struct file *f, struct super_block *sb);
-extern void file_sb_list_del(struct file *f);
-extern void mark_files_ro(struct super_block *);
 extern struct file *get_empty_filp(void);
 
 /*
  * super.c
  */
 extern int do_remount_sb(struct super_block *, int, void *, int);
+extern int do_remount_sb2(struct vfsmount *, struct super_block *, int,
+								void *, int);
 extern bool grab_super_passive(struct super_block *sb);
 extern struct dentry *mount_fs(struct file_system_type *,
-			       int, const char *, void *);
+			       int, const char *, struct vfsmount *, void *);
 extern struct super_block *user_get_super(dev_t);
 
 /*
