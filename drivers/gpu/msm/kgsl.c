@@ -29,6 +29,7 @@
 #include <linux/mman.h>
 #include <linux/sort.h>
 #include <linux/security.h>
+#include <linux/compat.h>
 #include <asm/cacheflush.h>
 
 #include "kgsl.h"
@@ -4138,7 +4139,7 @@ kgsl_get_unmapped_area(struct file *file, unsigned long addr,
 
 put:
 	if (IS_ERR_VALUE(ret))
-		KGSL_MEM_ERR(device,
+		KGSL_MEM_ERR_RATELIMITED(device,
 				"pid %d pgoff %lx len %ld failed error %ld\n",
 				private->pid, pgoff, len, ret);
 	kgsl_mem_entry_put(entry);
