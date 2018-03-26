@@ -11,6 +11,7 @@
 #define KGSL_CLK_MEM_IFACE 0x00000010
 #define KGSL_CLK_AXI	0x00000020
 #define KGSL_CLK_ALT_MEM_IFACE 0x00000040
+#define KGSL_CLK_RBBMTIMER	0x00000080
 
 #define KGSL_MAX_PWRLEVELS 10
 
@@ -61,14 +62,12 @@ struct kgsl_device_iommu_data {
  * @bus_freq:		Bus bandwidth vote index
  * @bus_min:		Min bus index @gpu_freq
  * @bus_max:		Max bus index @gpu_freq
- * @io_fraction:	IO percetage vote to the CPU
  */
 struct kgsl_pwrlevel {
 	unsigned int gpu_freq;
 	unsigned int bus_freq;
 	unsigned int bus_min;
 	unsigned int bus_max;
-	unsigned int io_fraction;
 };
 
 /**
