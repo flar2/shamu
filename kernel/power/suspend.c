@@ -226,10 +226,11 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		if (!(suspend_test(TEST_CORE) || *wakeup)) {
 			error = suspend_ops->enter(state);
 			events_check_enabled = false;
-		} else {
+		} else if (*wakeup) {
 			pm_get_active_wakeup_sources(suspend_abort,
 				MAX_SUSPEND_ABORT_LEN);
 			log_suspend_abort_reason(suspend_abort);
+			error = -EBUSY;
 		}
 
 		start_logging_wakeup_reasons();
@@ -293,14 +294,8 @@ static bool suspend_again(bool *drivers_resumed)
 	if (suspend_again_consensus() &&
 		       !freeze_kernel_threads()) {
 		clear_wakeup_reasons();
+		dpm_suspend_start(PMSG_SUSPEND);
 		*drivers_resumed = false;
-		if (dpm_suspend_start(PMSG_SUSPEND)) {
-			printk(KERN_ERR "PM: Some devices failed to suspend\n");
-			log_suspend_abort_reason("Some devices failed to suspend");
-			if (suspend_ops->recover)
-				suspend_ops->recover();
-			return false;
-		}
 		return true;
 	}
 
