@@ -34,15 +34,15 @@ struct secure_meta {
 };
 
 struct cp2_mem_chunks {
-	unsigned int *chunk_list;
-	unsigned int chunk_list_size;
-	unsigned int chunk_size;
+	u32 chunk_list;
+	u32 chunk_list_size;
+	u32 chunk_size;
 } __attribute__ ((__packed__));
 
 struct cp2_lock_req {
 	struct cp2_mem_chunks chunks;
-	unsigned int mem_usage;
-	unsigned int lock;
+	u32 mem_usage;
+	u32 lock;
 } __attribute__ ((__packed__));
 
 #define MEM_PROTECT_LOCK_ID2     0x0A
@@ -99,9 +99,9 @@ static struct secure_meta *secure_meta_lookup(struct sg_table *table)
 }
 
 
-static int secure_buffer_change_chunk(unsigned long chunks,
-				unsigned int nchunks,
-				unsigned int chunk_size,
+static int secure_buffer_change_chunk(u32 chunks,
+				u32 nchunks,
+				u32 chunk_size,
 				enum cp_mem_usage usage,
 				int lock)
 {
@@ -111,7 +111,7 @@ static int secure_buffer_change_chunk(unsigned long chunks,
 	request.mem_usage = usage;
 	request.lock = lock;
 
-	request.chunks.chunk_list = (unsigned int *)chunks;
+	request.chunks.chunk_list = chunks;
 	request.chunks.chunk_list_size = nchunks;
 	request.chunks.chunk_size = chunk_size;
 
@@ -128,22 +128,28 @@ static int secure_buffer_change_table(struct sg_table *table,
 				enum cp_mem_usage usage,
 				int lock)
 {
-	int i;
+	int i, j;
 	int ret = -EINVAL;
-	unsigned long *chunk_list;
+	u32 *chunk_list;
 	struct scatterlist *sg;
 
 	for_each_sg(table->sgl, sg, table->nents, i) {
 		int nchunks;
-		int size = sg_dma_len(sg);
+		int size = sg->length;
 		int chunk_list_len;
 		phys_addr_t chunk_list_phys;
 
 		/*
 		 * This should theoretically be a phys_addr_t but the protocol
-		 * indicates this should be an unsigned long.
+		 * indicates this should be a u32.
 		 */
-		unsigned long base = (unsigned long)sg_dma_address(sg);
+		u32 base;
+		u64 tmp = sg_dma_address(sg);
+		WARN((tmp >> 32) & 0xffffffff,
+			"%s: there are ones in the upper 32 bits of the sg at %p! They will be truncated! Address: 0x%llx\n",
+			__func__, sg, tmp);
+
+		base = (u32)tmp;
 
 		if (unlikely(!size || (size % V2_CHUNK_SIZE))) {
 			WARN(1,
@@ -153,7 +159,7 @@ static int secure_buffer_change_table(struct sg_table *table,
 		}
 
 		nchunks = size / V2_CHUNK_SIZE;
-		chunk_list_len = sizeof(unsigned long)*nchunks;
+		chunk_list_len = sizeof(u32)*nchunks;
 
 		chunk_list = kzalloc(chunk_list_len, GFP_KERNEL);
 
@@ -161,8 +167,8 @@ static int secure_buffer_change_table(struct sg_table *table,
 			return -ENOMEM;
 
 		chunk_list_phys = virt_to_phys(chunk_list);
-		for (i = 0; i < nchunks; i++)
-			chunk_list[i] = base + i * V2_CHUNK_SIZE;
+		for (j = 0; j < nchunks; j++)
+			chunk_list[j] = base + j * V2_CHUNK_SIZE;
 
 		/*
 		 * Flush the chunk list before sending the memory to the
@@ -173,6 +179,17 @@ static int secure_buffer_change_table(struct sg_table *table,
 
 		ret = secure_buffer_change_chunk(virt_to_phys(chunk_list),
 				nchunks, V2_CHUNK_SIZE, usage, lock);
+
+		if (!ret) {
+			/*
+			 * Set or clear the private page flag to communicate the
+			 * status of the chunk to other entities
+			 */
+			if (lock)
+				SetPagePrivate(sg_page(sg));
+			else
+				ClearPagePrivate(sg_page(sg));
+		}
 
 		kfree(chunk_list);
 	}

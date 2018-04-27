@@ -11,21 +11,10 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _LINUX_COMPAT_ION_H
-#define _LINUX_COMPAT_ION_H
+#include <linux/notifier.h>
 
-#include <linux/ion.h>
+int show_mem_notifier_register(struct notifier_block *nb);
 
-#if IS_ENABLED(CONFIG_COMPAT)
+int show_mem_notifier_unregister(struct notifier_block *nb);
 
-long compat_msm_ion_ioctl(struct ion_client *client, unsigned int cmd,
-					unsigned long arg);
-
-#define compat_ion_user_handle_t compat_int_t
-
-#else
-
-#define compat_msm_ion_ioctl  msm_ion_custom_ioctl
-
-#endif
-#endif
+void show_mem_call_notifiers(void);
